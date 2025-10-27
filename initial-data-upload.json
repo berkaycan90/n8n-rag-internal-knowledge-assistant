@@ -1,0 +1,551 @@
+{
+  "name": "Internal Knowledge Assistant - Setup - Initial Bulk Upload",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -1296,
+        -432
+      ],
+      "id": "1dc4b336-a91c-444e-819a-3c89ae436ada",
+      "name": "Manuel Start"
+    },
+    {
+      "parameters": {
+        "resource": "fileFolder",
+        "returnAll": true,
+        "filter": {
+          "folderId": {
+            "__rl": true,
+            "value": "1tkzc2EE9rSeCfSJi-71bwrFDUSdkpf9O",
+            "mode": "list",
+            "cachedResultName": " AI-Powered Internal Knowledge Assistant.RAG",
+            "cachedResultUrl": "https://drive.google.com/drive/folders/1tkzc2EE9rSeCfSJi-71bwrFDUSdkpf9O"
+          }
+        },
+        "options": {
+          "fields": [
+            "name",
+            "id",
+            "mimeType",
+            "spaces"
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        -1072,
+        -432
+      ],
+      "id": "66b91c56-dc43-4430-8203-a8607d37d376",
+      "name": "List All Documents",
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "QwwLRyh2z4vOnQuq",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "download",
+        "fileId": {
+          "__rl": true,
+          "value": "={{ $json.id }}",
+          "mode": "id"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        -1088,
+        -80
+      ],
+      "id": "a8288770-810a-4b98-9897-3881a29a7d5b",
+      "name": "Google Drive - Download File",
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "QwwLRyh2z4vOnQuq",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        -1360,
+        -64
+      ],
+      "id": "ff59f8b0-50fa-493b-b29c-f55ec0279df1",
+      "name": "Loop Over Items"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.unstructuredapp.io/general/v0/general",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "parameterType": "formBinaryData",
+              "name": "files",
+              "inputDataFieldName": "data"
+            },
+            {
+              "name": "strategy",
+              "value": "hi_res"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -848,
+        -80
+      ],
+      "id": "10d1f758-3d26-4c3d-b1a5-efdd23b324cc",
+      "name": "🧠 Unstructured.io - Extract Text",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "zWSE7lPiw33CSR1o",
+          "name": "Header Auth account 3"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================\n// AGGREGATE BY FILE (METADATA PRESERVATION)\n// ============================================\n\nconst items = $input.all();\n\n// Dosyalara göre grupla\nconst fileGroups = {};\n\nitems.forEach(item => {\n  const filename = item.json.metadata?.filename || 'unknown';\n  \n  if (!fileGroups[filename]) {\n    fileGroups[filename] = {\n      filename: filename,\n      elements: [],\n      totalElements: 0\n    };\n  }\n  \n  fileGroups[filename].elements.push({\n    text: item.json.text || '',\n    type: item.json.type || 'UnknownType',\n    pageNumber: item.json.metadata?.page_number,\n    parentId: item.json.metadata?.parent_id,\n    elementId: item.json.element_id\n  });\n  \n  fileGroups[filename].totalElements++;\n});\n\nconsole.log(`📁 Grouped ${items.length} elements into ${Object.keys(fileGroups).length} files`);\n\n// Her dosya için detay\nObject.entries(fileGroups).forEach(([filename, data]) => {\n  console.log(`   ${filename}: ${data.totalElements} elements`);\n});\n\n// Output: Her dosya bir item olarak\nreturn Object.values(fileGroups).map(fileData => ({\n  json: fileData\n}));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -640,
+        -80
+      ],
+      "id": "8b6b5107-8fd0-40f8-a66a-dddbfece8115",
+      "name": "Aggregate by File"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================\n// CHUNK DOCUMENTS (STRUCTURE-AWARE)\n// ============================================\n\nconst files = $input.all();\n\n// Chunking parametreleri\nconst CHUNK_CONFIG = {\n  maxTokens: 500,\n  overlap: 100,\n  preserveTitles: true\n};\n\n// Basit token estimator\nfunction estimateTokens(text) {\n  return Math.ceil(text.split(/\\s+/).length * 1.3);\n}\n\n// Chunking function\nfunction createChunks(elements, filename) {\n  const chunks = [];\n  let currentChunk = {\n    text: '',\n    elements: [],\n    metadata: {\n      filename: filename,\n      types: new Set(),\n      pages: new Set(),\n      hasTitle: false,\n      elementCount: 0\n    }\n  };\n  \n  elements.forEach((element) => {\n    const isTitle = element.type === 'Title';\n    const currentTokens = estimateTokens(currentChunk.text);\n    const elementTokens = estimateTokens(element.text);\n    \n    // Yeni chunk başlat?\n    const shouldStartNewChunk = currentChunk.text && (\n      (CHUNK_CONFIG.preserveTitles && isTitle) ||\n      (currentTokens + elementTokens > CHUNK_CONFIG.maxTokens)\n    );\n    \n    if (shouldStartNewChunk) {\n      // Mevcut chunk'ı kaydet\n      chunks.push({\n        text: currentChunk.text.trim(),\n        metadata: {\n          ...currentChunk.metadata,\n          types: Array.from(currentChunk.metadata.types),\n          pages: Array.from(currentChunk.metadata.pages).sort((a,b) => a-b),\n          tokenCount: estimateTokens(currentChunk.text),\n          chunkIndex: chunks.length\n        }\n      });\n      \n      // Yeni chunk (overlap ile)\n      const overlapElements = currentChunk.elements.slice(-2);\n      currentChunk = {\n        text: overlapElements.map(e => e.text).join('\\n\\n'),\n        elements: overlapElements,\n        metadata: {\n          filename: filename,\n          types: new Set(),\n          pages: new Set(),\n          hasTitle: false,\n          elementCount: 0\n        }\n      };\n    }\n    \n    // Element ekle\n    currentChunk.text += (currentChunk.text ? '\\n\\n' : '') + element.text;\n    currentChunk.elements.push(element);\n    currentChunk.metadata.types.add(element.type);\n    if (element.pageNumber) currentChunk.metadata.pages.add(element.pageNumber);\n    if (isTitle) currentChunk.metadata.hasTitle = true;\n    currentChunk.metadata.elementCount++;\n  });\n  \n  // Son chunk\n  if (currentChunk.text.trim()) {\n    chunks.push({\n      text: currentChunk.text.trim(),\n      metadata: {\n        ...currentChunk.metadata,\n        types: Array.from(currentChunk.metadata.types),\n        pages: Array.from(currentChunk.metadata.pages).sort((a,b) => a-b),\n        tokenCount: estimateTokens(currentChunk.text),\n        chunkIndex: chunks.length\n      }\n    });\n  }\n  \n  return chunks;\n}\n\n// ============================================\n// Her dosyayı chunk'la\n// ============================================\n\nconst allChunks = [];\nlet totalChunks = 0;\n\nfiles.forEach(file => {\n  const fileData = file.json;\n  const filename = fileData.filename;\n  const elements = fileData.elements;\n  \n  console.log(`\\n📄 ${filename}`);\n  console.log(`   Elements: ${elements.length}`);\n  \n  const chunks = createChunks(elements, filename);\n  console.log(`   ✅ Chunks: ${chunks.length}`);\n  \n  chunks.forEach((chunk, idx) => {\n    allChunks.push({\n      json: {\n        content: chunk.text,\n        metadata: chunk.metadata,\n        filename: filename,\n        chunkId: `${filename}_chunk_${idx}`,\n        totalChunksInFile: chunks.length\n      }\n    });\n  });\n  \n  totalChunks += chunks.length;\n});\n\nconsole.log(`\\n🎉 TOTAL: ${totalChunks} chunks from ${files.length} files`);\n\nreturn allChunks;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -416,
+        -80
+      ],
+      "id": "13fef4d9-6367-408d-9424-ae61cb798d8a",
+      "name": "Chunk Documents-500 Token-100 Overlap"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/embeddings",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "model",
+              "value": "text-embedding-3-small"
+            },
+            {
+              "name": "input",
+              "value": "={{ $json.content }}"
+            },
+            {
+              "name": "encoding_format",
+              "value": "float"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -128,
+        -80
+      ],
+      "id": "eb992092-e11b-4573-920f-ffa6cc86b466",
+      "name": "Generate Embeddings (OpenAI)",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "y5TMgF60HjRgOTR9",
+          "name": "Header Auth account 4"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://internal-knowledge-assistant-pob2btv.svc.aped-4627-b74a.pinecone.io/vectors/upsert",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "pineconeApi",
+        "sendBody": true,
+        "specifyBody": "=json",
+        "bodyParameters": {
+          "parameters": [
+            {}
+          ]
+        },
+        "jsonBody": "={\n  \"vectors\": [\n    {\n      \"id\": {{ JSON.stringify($json.id) }},\n      \"values\": {{ JSON.stringify($json.embedding) }},\n      \"metadata\": {{ JSON.stringify($json.metadata) }}\n    }\n  ],\n  \"namespace\": \"\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        80,
+        256
+      ],
+      "id": "4c0113ff-1c3c-4b90-99c6-26f5408b3c71",
+      "name": "📌 Insert to Pinecone",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "2gZP64J9L9tLrQCY",
+          "name": "Header Auth account"
+        },
+        "pineconeApi": {
+          "id": "mlssg1bcBtHOCp24",
+          "name": "PineconeApi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineByPosition",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        -416,
+        256
+      ],
+      "id": "052251a1-7b9e-4bfa-bbba-a98745d4b82d",
+      "name": "Merge"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const item = $input.item.json;\n\nreturn {\n  json: {\n    id: item.chunkId,\n    \n    // ✅ ARRAY olarak bırak, string'e çevirme\n    embedding: item.data[0].embedding,  \n    \n    metadata: {\n      filename: item.filename,\n      chunkId: item.chunkId,\n      chunkIndex: item.metadata?.chunkIndex || 0,\n      totalChunks: item.totalChunksInFile,\n      content: item.content,\n      tokenCount: item.metadata?.tokenCount || 0,\n      hasTitle: item.metadata?.hasTitle || false\n    }\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -160,
+        256
+      ],
+      "id": "b7b40621-e341-4fa3-848f-e8668074b102",
+      "name": "Prepare for Databases"
+    },
+    {
+      "parameters": {
+        "tableId": "knowledge_documents",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "file_name",
+              "fieldValue": "={{ $('List All Documents').first().json.name }}"
+            },
+            {
+              "fieldId": "file_type",
+              "fieldValue": "={{ $('List All Documents').first().json.mimeType }}"
+            },
+            {
+              "fieldId": "file_size",
+              "fieldValue": "={{ parseInt($('Google Drive - Download File').first().binary.data.fileSize.replace(/[^0-9]/g, '')) * 1024 }}"
+            },
+            {
+              "fieldId": "chunk_count",
+              "fieldValue": "={{ $('Prepare for Databases').all().length }}"
+            },
+            {
+              "fieldId": "metadata",
+              "fieldValue": "={{ $json.metadata }}"
+            },
+            {
+              "fieldId": "processing_status",
+              "fieldValue": "completed"
+            },
+            {
+              "fieldId": "pinecone_namespace",
+              "fieldValue": " AI-Powered Internal Knowledge Assistant.RAG"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        528,
+        256
+      ],
+      "id": "728d6e7f-8b52-43d6-94c6-12794872bd0e",
+      "name": "Set- knowledge_documents table",
+      "credentials": {
+        "supabaseApi": {
+          "id": "dj1SoSogT6oxVVap",
+          "name": "Supabase account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Önceki node'lardan veri al\nconst fileInfo = $('List All Documents').first().json;\nconst chunks = $('Prepare for Databases').all();\n\n// Metadata objesi oluştur\nconst metadata = {\n  source: \"google_drive\",\n  drive_file_id: fileInfo.id,\n  original_name: fileInfo.name,\n  mime_type: fileInfo.mimeType,\n  chunks_created: chunks.length,\n  upload_timestamp: new Date().toISOString(),\n  processing_engine: \"unstructured.io\"\n};\n\n// Output'a ekle\nreturn [{\n  json: {\n    ...fileInfo,\n    metadata: metadata\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        320,
+        256
+      ],
+      "id": "60614f52-7820-4958-a3ba-b890bb2e90a5",
+      "name": "Get Metadata"
+    },
+    {
+      "parameters": {
+        "content": "\"📥 Document Source\"\nAutomatically lists all company documents from Google Drive",
+        "height": 336,
+        "width": 944,
+        "color": 5
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -1408,
+        -544
+      ],
+      "typeVersion": 1,
+      "id": "67756e5e-c935-4c64-9a74-60738f84d6b8",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "content": "\"📄 Document Extraction\"\nDownloads any document and extracts the text with Unstructured.io (PDF, DOCX, TXT,MD, Google DOCS)",
+        "height": 336,
+        "width": 944,
+        "color": 2
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -1408,
+        -208
+      ],
+      "typeVersion": 1,
+      "id": "1910930e-e59e-46a6-bdee-95a3a9ed4cbd",
+      "name": "Sticky Note1"
+    },
+    {
+      "parameters": {
+        "content": "\"✂️ Text Processing\"\nSplits documents into chunks of 500 tokens and creates a vector representation with OpenAI text-embedding-3-small",
+        "height": 336,
+        "width": 1184
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -464,
+        -208
+      ],
+      "typeVersion": 1,
+      "id": "69d21fb4-f5d7-4403-b5b1-f2d3a5a78f99",
+      "name": "Sticky Note2"
+    },
+    {
+      "parameters": {
+        "content": "\"💾 Hybrid Storage\"\nVector embeddings to Pinecone, stores metadata to Supabase (dual database architecture)",
+        "height": 320,
+        "width": 1184,
+        "color": 6
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -464,
+        128
+      ],
+      "typeVersion": 1,
+      "id": "ed0ff7dd-2d3c-4336-afcc-6db21f352d58",
+      "name": "Sticky Note3"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Manuel Start": {
+      "main": [
+        [
+          {
+            "node": "List All Documents",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "List All Documents": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Items": {
+      "main": [
+        [
+          {
+            "node": "Google Drive - Download File",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Drive - Download File": {
+      "main": [
+        [
+          {
+            "node": "🧠 Unstructured.io - Extract Text",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🧠 Unstructured.io - Extract Text": {
+      "main": [
+        [
+          {
+            "node": "Aggregate by File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate by File": {
+      "main": [
+        [
+          {
+            "node": "Chunk Documents-500 Token-100 Overlap",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Chunk Documents-500 Token-100 Overlap": {
+      "main": [
+        [
+          {
+            "node": "Generate Embeddings (OpenAI)",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Generate Embeddings (OpenAI)": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge": {
+      "main": [
+        [
+          {
+            "node": "Prepare for Databases",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare for Databases": {
+      "main": [
+        [
+          {
+            "node": "📌 Insert to Pinecone",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📌 Insert to Pinecone": {
+      "main": [
+        [
+          {
+            "node": "Get Metadata",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Metadata": {
+      "main": [
+        [
+          {
+            "node": "Set- knowledge_documents table",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "9218bb36-e8ef-48bf-a3e8-c2ed3ce0e2b0",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "07a6767757273069f0a582916e3c57f8190196d81fe9eb37ed92ada5e69b4db8"
+  },
+  "id": "gFyTPpgW1qWoFGw5",
+  "tags": [
+    {
+      "createdAt": "2025-10-24T01:17:12.079Z",
+      "updatedAt": "2025-10-24T01:17:12.079Z",
+      "id": "28znMmT2MqQUHQz4",
+      "name": "RAG"
+    }
+  ]
+}
