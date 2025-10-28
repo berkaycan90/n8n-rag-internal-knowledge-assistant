@@ -1,0 +1,157 @@
+{
+  "name": "Internal Knowledge Assistant-Voice Assistant(IVR)-Initial Call",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "voice-ivr",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -736,
+        -448
+      ],
+      "id": "f707c9c3-ee67-4a9c-a379-3da005c52f0a",
+      "name": "Incoming call",
+      "webhookId": "d8dedc95-0862-4139-937c-a57ff9014fd4"
+    },
+    {
+      "parameters": {
+        "jsCode": "const twiml = `<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<Response>\n    <Say voice=\"Polly.Joanna\" language=\"en-US\">\n        Hello! Welcome to our knowledge system. Please ask your question clearly and briefly.\n    </Say>\n    <Gather \n        input=\"speech\" \n        action=\"https://berkaycann.app.n8n.cloud/webhook/voice-speech\" \n        method=\"POST\"\n        language=\"en-US\"\n        speechTimeout=\"auto\"\n        timeout=\"5\">\n    </Gather>\n    <Say voice=\"Polly.Joanna\" language=\"en-US\">\n        Sorry, I didn't catch that.\n    </Say>\n    <Hangup/>\n</Response>`;\n\nreturn [{\n  json: {\n    twiml: twiml\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -304,
+        -448
+      ],
+      "id": "dc3b8c94-28b0-4654-8069-1a2397553b50",
+      "name": "TwiML Welcome Response"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Twilio'dan gelen arama verileri\nconst from = $input.item.json.body.From || 'unknown';\nconst to = $input.item.json.body.To || 'unknown';\nconst callSid = $input.item.json.body.CallSid || 'unknown';\n\nreturn {\n  json: {\n    from: from,\n    to: to,\n    callSid: callSid,\n    platform: 'voice',\n    timestamp: new Date().toISOString()\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -512,
+        -448
+      ],
+      "id": "d4357427-0c13-4f21-a228-c94d5c259d1b",
+      "name": "Parse Call Data"
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{ $json.twiml }}",
+        "options": {
+          "responseCode": 200,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "application/xml"
+              }
+            ]
+          }
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        128,
+        -208
+      ],
+      "id": "3049563e-c0d4-4a2b-98a4-df8d79889907",
+      "name": "Respond to Webhook"
+    },
+    {
+      "parameters": {
+        "content": "📞 Call Handler\nReceives incoming call from Twilio, parses caller info, and returns TwiML response for voice interaction",
+        "height": 256,
+        "width": 944,
+        "color": 3
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -960,
+        -528
+      ],
+      "typeVersion": 1,
+      "id": "aa44e5be-19e0-484c-8c60-0a8e4840843f",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "content": "🎙️ TwiML Generator\nGenerates TwiML with <Gather> for speech-to-text input, prompts user with welcome message, and triggers speech workflow",
+        "height": 192,
+        "width": 816
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -496,
+        -272
+      ],
+      "typeVersion": 1,
+      "id": "2c472c8b-5990-402d-b85e-178a404c415b",
+      "name": "Sticky Note1"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Incoming call": {
+      "main": [
+        [
+          {
+            "node": "Parse Call Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Call Data": {
+      "main": [
+        [
+          {
+            "node": "TwiML Welcome Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "TwiML Welcome Response": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "afc3cba7-c1ea-49fa-bc52-13952bcfaeec",
+  "meta": {
+    "instanceId": "07a6767757273069f0a582916e3c57f8190196d81fe9eb37ed92ada5e69b4db8"
+  },
+  "id": "TpI6k6MWRrwXLClV",
+  "tags": [
+    {
+      "createdAt": "2025-10-24T01:17:12.079Z",
+      "updatedAt": "2025-10-24T01:17:12.079Z",
+      "id": "28znMmT2MqQUHQz4",
+      "name": "RAG"
+    }
+  ]
+}
