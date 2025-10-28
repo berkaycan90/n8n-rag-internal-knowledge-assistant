@@ -1,0 +1,200 @@
+{
+  "name": "Internal Knowledge Assistant - Slack Bot",
+  "nodes": [
+    {
+      "parameters": {
+        "trigger": [
+          "app_mention"
+        ],
+        "watchWorkspace": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.slackTrigger",
+      "typeVersion": 1,
+      "position": [
+        -624,
+        -336
+      ],
+      "id": "eaf77f57-afa4-4190-b1c9-2fd68cc31b69",
+      "name": "Slack @Bot Trigger",
+      "webhookId": "c50a211e-afd2-4de0-b48a-554d178c3e82",
+      "alwaysOutputData": false,
+      "credentials": {
+        "slackApi": {
+          "id": "nVqYFzCznCemsNq1",
+          "name": "Slack account 3"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Slack event data\nconst body = $input.first().json;\n\n// Direkt app_mention event\nif (body.type === 'app_mention') {\n  // Mesajdan bot mention'ı temizle\n  const message = body.text.replace(/<@[A-Z0-9]+>/g, '').trim();\n  \n  return [{\n    json: {\n      user_id: body.user,\n      channel: body.channel,\n      message: message,\n      thread_ts: body.thread_ts || body.ts,\n      ts: body.ts\n    }\n  }];\n}\n\n// URL verification (Slack Event Subscriptions için)\nif (body.type === 'url_verification') {\n  return [{\n    json: {\n      challenge: body.challenge\n    }\n  }];\n}\n\n// Diğer event'ler\nreturn [{\n  json: {\n    error: \"Unknown event\",\n    type: body.type\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -416,
+        -176
+      ],
+      "id": "f0329b2f-8cd1-428b-9eaf-504fc7d60e9e",
+      "name": "Parse Slack Event"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://berkaycann.app.n8n.cloud/webhook/KnowledgeSearch",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"query\": \"={{ $json.message }}\",\n  \"user_id\": \"={{ $json.user_id }}\",\n  \"platform\": \"slack\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -208,
+        -176
+      ],
+      "id": "00611d29-c131-4856-8e9e-486c6ec068d5",
+      "name": "HTTP Request"
+    },
+    {
+      "parameters": {
+        "jsCode": "// RAG'den gelen cevap\nconst ragResponse = $input.item.json;\n\n// Cevabı parse et\nconst answer = ragResponse.answer || ragResponse.context || ragResponse.response || 'Cevap bulunamadı';\n\n// Sources - farklı formatları kontrol et\nlet sources = [];\nif (ragResponse.sources && Array.isArray(ragResponse.sources)) {\n  sources = ragResponse.sources;\n} else if (ragResponse.metadata && ragResponse.metadata.sources) {\n  sources = ragResponse.metadata.sources;\n}\n\n// Parse Slack Event'ten soruyu al\nconst slackEvent = $('Parse Slack Event').first();\nconst question = slackEvent?.json?.question || slackEvent?.json?.text || 'Soru bulunamadı';\n\n// Slack formatında cevap hazırla\nlet slackMessage = `💡 *Cevap:*\\n${answer}\\n\\n`;\n\n// Eğer source'lar varsa ekle\nif (sources && sources.length > 0) {\n  slackMessage += `📄 *Kaynaklar:*\\n`;\n  sources.forEach((source, index) => {\n    // String mi yoksa object mi kontrol et\n    const filename = typeof source === 'string' \n      ? source \n      : (source.filename || source.name || source.document || 'Unknown');\n    \n    const score = (typeof source === 'object' && source.score) \n      ? ` (Güvenilirlik: ${(source.score * 100).toFixed(0)}%)` \n      : '';\n    \n    slackMessage += `   ${index + 1}. ${filename}${score}\\n`;\n  });\n}\n\nreturn {\n  json: {\n    text: slackMessage,\n    response_type: \"in_channel\"\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        48,
+        -176
+      ],
+      "id": "bf17e407-ea79-41d2-ab16-c1f7c3be864e",
+      "name": "Format Slack Response"
+    },
+    {
+      "parameters": {
+        "authentication": "oAuth2",
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "value": "C09HRV7HZSS",
+          "mode": "list",
+          "cachedResultName": "n8n-test"
+        },
+        "text": "={{ $json.text }}",
+        "otherOptions": {}
+      },
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.3,
+      "position": [
+        288,
+        -176
+      ],
+      "id": "a0c67158-9564-4884-b033-77b329fb0786",
+      "name": "Send a message",
+      "webhookId": "5a446685-3fb8-41c5-ad26-ffabb7c52f9b",
+      "credentials": {
+        "slackOAuth2Api": {
+          "id": "uGBCPLa4eqIkcXCN",
+          "name": "Slack account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "💬 Slack Channel Handler\nReceives @mentions from Slack, parses event data, and sends formatted responses back to thread)",
+        "height": 448,
+        "width": 720,
+        "color": 5
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -752,
+        -416
+      ],
+      "typeVersion": 1,
+      "id": "206b069a-5e8a-48f9-930f-51dfcc92c668",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "content": "🔗 Query & Format \nCalls core RAG workflow for answer generation and formats response for Slack markdown",
+        "height": 448,
+        "width": 656,
+        "color": 6
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -32,
+        -416
+      ],
+      "typeVersion": 1,
+      "id": "1463d1ae-a3c2-4da6-9fb9-d2d065e7da57",
+      "name": "Sticky Note1"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Slack @Bot Trigger": {
+      "main": [
+        [
+          {
+            "node": "Parse Slack Event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Slack Event": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Format Slack Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Slack Response": {
+      "main": [
+        [
+          {
+            "node": "Send a message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "a20320ba-eecd-4300-99c9-a48be095c5fb",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "07a6767757273069f0a582916e3c57f8190196d81fe9eb37ed92ada5e69b4db8"
+  },
+  "id": "vQ3cyeVqNww2K83F",
+  "tags": [
+    {
+      "createdAt": "2025-10-24T01:17:12.079Z",
+      "updatedAt": "2025-10-24T01:17:12.079Z",
+      "id": "28znMmT2MqQUHQz4",
+      "name": "RAG"
+    }
+  ]
+}
