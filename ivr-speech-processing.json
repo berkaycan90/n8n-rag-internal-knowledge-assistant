@@ -1,0 +1,311 @@
+{
+  "name": "Internal Knowledge Assistant-Voice Assistant(IVR)-Speech Processing",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "voice-speech",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -1072,
+        -160
+      ],
+      "id": "fe8fcd36-c6ab-4f63-8684-1a4872237f09",
+      "name": "Speech Result",
+      "webhookId": "b2a3d4a5-3644-4784-8d54-8f14ef59ece0"
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $input.item.json.body;\n\nreturn {\n  json: {\n    recordingUrl: body.RecordingUrl,  // Ses kaydı URL'si\n    callSid: body.CallSid,\n    recordingSid: body.RecordingSid,\n    question: body.TranscriptionText || body.SpeechResult || \"\"  // Gerçek soru metnini al\n  }\n};\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -800,
+        -160
+      ],
+      "id": "40fe9b18-5a1f-4e1e-b94e-e9340c84fe46",
+      "name": "Extract Question"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://berkaycann.app.n8n.cloud/webhook/KnowledgeSearch",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"question\": \"={{ $json.question }}\",\n  \"platform\": \"voice\",\n  \"user_id\": \"={{ $('Speech Result').item.json.body.Caller }}\",\n  \"conversation_id\": \"={{ $json.callSid }}\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1072,
+        144
+      ],
+      "id": "aaf112da-661d-4987-a42c-8a9e2f5d55f4",
+      "name": "Call RAG Workflow"
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{ $json.twiml }}",
+        "options": {
+          "responseCode": 200,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "application/xml"
+              }
+            ]
+          }
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        -144,
+        -176
+      ],
+      "id": "d642a14a-442d-4021-942d-7fc23dca7e33",
+      "name": "Respond to Webhook"
+    },
+    {
+      "parameters": {
+        "tableId": "knowledge_messages",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "conversation_id",
+              "fieldValue": "={{ $('Extract Question').item.json.callSid }}"
+            },
+            {
+              "fieldId": "user_id",
+              "fieldValue": "={{ $('Speech Result').item.json.body.From }}"
+            },
+            {
+              "fieldId": "platform",
+              "fieldValue": "voice"
+            },
+            {
+              "fieldId": "role",
+              "fieldValue": "user"
+            },
+            {
+              "fieldId": "content",
+              "fieldValue": "={{ $('Extract Question').item.json.question }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        -288,
+        144
+      ],
+      "id": "0ec9c5fc-0b02-48bf-a9aa-f8deecc56f0d",
+      "name": "Save Conversation",
+      "credentials": {
+        "supabaseApi": {
+          "id": "dj1SoSogT6oxVVap",
+          "name": "Supabase account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "tableId": "knowledge_messages",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "conversation_id",
+              "fieldValue": "={{ $('Extract Question').item.json.callSid }}"
+            },
+            {
+              "fieldId": "user_id",
+              "fieldValue": "={{ $json.user_id }}"
+            },
+            {
+              "fieldId": "platform",
+              "fieldValue": "voice"
+            },
+            {
+              "fieldId": "role",
+              "fieldValue": "voice"
+            },
+            {
+              "fieldId": "content",
+              "fieldValue": "={{ $('Format Voice Response').item.json.answer }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        16,
+        144
+      ],
+      "id": "5892f066-ef19-40e7-b759-83d8c8da9dcc",
+      "name": "Save Assistant Response",
+      "credentials": {
+        "supabaseApi": {
+          "id": "dj1SoSogT6oxVVap",
+          "name": "Supabase account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const answer = $input.item.json.answer || 'I could not find an answer to your question.';\nconst speechResult = $input.item.json.SpeechResult || 'No speech detected';\n\nconst twiml = `<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<Response>\n    <Say voice=\"Polly.Joanna\" language=\"en-US\">\n        ${answer}\n    </Say>\n    <Hangup/>\n</Response>`;\n\nreturn [{\n  json: {\n    twiml: twiml,\n    speechResult: speechResult,\n    answer: answer\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -816,
+        144
+      ],
+      "id": "5b03a71c-103e-415e-b774-6db4fe3ad863",
+      "name": "Format Voice Response"
+    },
+    {
+      "parameters": {
+        "content": "🎤 Speech-to-Text Handler\nReceives speech recognition result from Twilio, extracts user question, and manages webhook response",
+        "height": 240,
+        "width": 1328,
+        "color": 3
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -1120,
+        -224
+      ],
+      "typeVersion": 1,
+      "id": "ca8007d8-f07a-4e44-a65b-4856a2b7188c",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "content": "🔗 Query & TwiML Pipeline\nCalls core RAG main workflow with speech text and formats AI answer into TwiML for text-to-speech playback",
+        "height": 288,
+        "width": 720,
+        "color": 6
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -1120,
+        16
+      ],
+      "typeVersion": 1,
+      "id": "d450b6ec-3553-45d6-ae1e-21f93a06162f",
+      "name": "Sticky Note1"
+    },
+    {
+      "parameters": {
+        "content": "💾 Conversation Storage \nLogs user question and AI response to Supabase for analytics and conversation history",
+        "height": 288,
+        "width": 608,
+        "color": 4
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -400,
+        16
+      ],
+      "typeVersion": 1,
+      "id": "6f14ebc9-c2e5-46d5-bc13-0a6697f76259",
+      "name": "Sticky Note2"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Speech Result": {
+      "main": [
+        [
+          {
+            "node": "Extract Question",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Question": {
+      "main": [
+        [
+          {
+            "node": "Call RAG Workflow",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call RAG Workflow": {
+      "main": [
+        [
+          {
+            "node": "Format Voice Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Respond to Webhook": {
+      "main": [
+        []
+      ]
+    },
+    "Save Conversation": {
+      "main": [
+        [
+          {
+            "node": "Save Assistant Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Voice Response": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Save Conversation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "05cdb3dd-6fc2-4a33-b07a-a365b2aab445",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "07a6767757273069f0a582916e3c57f8190196d81fe9eb37ed92ada5e69b4db8"
+  },
+  "id": "oBJV2ktGk7KKCzJ3",
+  "tags": [
+    {
+      "createdAt": "2025-10-24T01:17:12.079Z",
+      "updatedAt": "2025-10-24T01:17:12.079Z",
+      "id": "28znMmT2MqQUHQz4",
+      "name": "RAG"
+    }
+  ]
+}
