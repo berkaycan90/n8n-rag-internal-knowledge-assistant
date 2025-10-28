@@ -1,0 +1,294 @@
+{
+  "name": "Internal Knowledge Assistant-WhatsApp Message",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "whatsapp-incoming",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -864,
+        -240
+      ],
+      "id": "5f77fc18-ed00-48ce-9ebb-316cf68590d5",
+      "name": "Whatsapp Message",
+      "webhookId": "45e1e055-20d7-4512-aa1f-285d8f7358e5"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Twilio WhatsApp'tan gelen mesaj\nconst body = $input.item.json.body;\nconst message = body.Body || '';\nconst from = body.From || 'unknown'; // Format: whatsapp:+905551234567\nconst to = body.To || 'unknown';\nconst messageSid = body.MessageSid || 'unknown';\n\n// WhatsApp prefix'ini temizle\nconst cleanFrom = from.replace('whatsapp:', '');\n\nreturn {\n  json: {\n    question: message.trim(),\n    from: cleanFrom,\n    to: to,\n    messageSid: messageSid,\n    platform: 'whatsapp',\n    timestamp: new Date().toISOString()\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -656,
+        -240
+      ],
+      "id": "7fb56471-b437-4ea6-a9c8-92bf94dc4279",
+      "name": "Extract WhatsApp Message"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://berkaycann.app.n8n.cloud/webhook/KnowledgeSearch",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"question\": \"={{ $json.question }}\",\n  \"platform\": \"whatsapp\",\n  \"user_id\": \"={{ $json.from }}\",\n  \"conversation_id\": \"={{ $json.from }}\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -864,
+        16
+      ],
+      "id": "f95ab79e-279e-4d6a-931c-6f8857133824",
+      "name": "Call RAG Workflow"
+    },
+    {
+      "parameters": {
+        "jsCode": "// RAG'den gelen cevap\nconst ragResponse = $input.item.json;\nconst answer = ragResponse.answer || ragResponse.response || 'I apologize, but I could not find an answer to your question.';\nconst sources = ragResponse.sources || [];\n\n// WhatsApp mesajı formatla\nlet whatsappMessage = `📚 *Answer:*\\n\\n${answer}`;\n\n// Kaynakları ekle\nif (sources && sources.length > 0) {\n  whatsappMessage += '\\n\\n📄 *Sources:*\\n';\n  sources.forEach((source, index) => {\n    const filename = typeof source === 'string' \n      ? source \n      : (source.filename || source.name || 'Unknown');\n    whatsappMessage += `${index + 1}. ${filename}\\n`;\n  });\n}\n\nreturn {\n  json: {\n    message: whatsappMessage,\n    answer: answer,\n    question: $('Extract WhatsApp Message').item.json.question\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -368,
+        16
+      ],
+      "id": "2f54dbb7-c51c-4614-b700-3b7c681f9862",
+      "name": "Format WhatsApp Response"
+    },
+    {
+      "parameters": {
+        "from": "+14155238886",
+        "to": "={{ $('Extract WhatsApp Message').item.json.from }}",
+        "toWhatsapp": true,
+        "message": "=={{ $json.message }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.twilio",
+      "typeVersion": 1,
+      "position": [
+        -160,
+        -256
+      ],
+      "id": "2a5fcda8-f87a-4029-8d63-8a64a9590b4f",
+      "name": "Send WhatsApp Reply",
+      "credentials": {
+        "twilioApi": {
+          "id": "e9qKwh8JVIK0Lh4k",
+          "name": "Twilio account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "tableId": "knowledge_messages",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "conversation_id",
+              "fieldValue": "={{ $('Extract WhatsApp Message').item.json.from }}"
+            },
+            {
+              "fieldId": "user_id",
+              "fieldValue": "={{ $('Extract WhatsApp Message').item.json.from }}"
+            },
+            {
+              "fieldId": "platform",
+              "fieldValue": "whatsapp"
+            },
+            {
+              "fieldId": "role",
+              "fieldValue": "whatsapp"
+            },
+            {
+              "fieldId": "content",
+              "fieldValue": "={{ $('Extract WhatsApp Message').item.json.question }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        64,
+        -256
+      ],
+      "id": "a599dc17-a626-4163-9db5-242d4d0558e3",
+      "name": "Save User Message",
+      "credentials": {
+        "supabaseApi": {
+          "id": "dj1SoSogT6oxVVap",
+          "name": "Supabase account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "tableId": "knowledge_messages",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "conversation_id",
+              "fieldValue": "={{ $('Extract WhatsApp Message').item.json.from }}"
+            },
+            {
+              "fieldId": "user_id",
+              "fieldValue": "={{ $('Extract WhatsApp Message').item.json.from }}"
+            },
+            {
+              "fieldId": "platform",
+              "fieldValue": "whatsapp"
+            },
+            {
+              "fieldId": "role",
+              "fieldValue": "assistant"
+            },
+            {
+              "fieldId": "content",
+              "fieldValue": "={{ $('Format WhatsApp Response').item.json.answer }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        272,
+        -256
+      ],
+      "id": "565ed17d-0747-4d07-9691-861566eeab56",
+      "name": "Save Assistant Response",
+      "credentials": {
+        "supabaseApi": {
+          "id": "dj1SoSogT6oxVVap",
+          "name": "Supabase account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "💬 WhatsApp Handler\nReceives messages via Twilio WhatsApp webhook, extracts query, sends reply, and logs conversation to Supabase",
+        "height": 272,
+        "width": 1376,
+        "color": 4
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -912,
+        -336
+      ],
+      "typeVersion": 1,
+      "id": "5d3e87ae-edd6-4dd9-804f-7d2c4ea6d276",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "content": "🔗 Query & Format Pipeline\nCalls core RAG workflow for answer generation and formats response for WhatsApp message format\n",
+        "height": 240,
+        "width": 1376,
+        "color": 5
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -912,
+        -64
+      ],
+      "typeVersion": 1,
+      "id": "2d26c154-5e06-4930-8496-97382a4f27ce",
+      "name": "Sticky Note1"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Whatsapp Message": {
+      "main": [
+        [
+          {
+            "node": "Extract WhatsApp Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract WhatsApp Message": {
+      "main": [
+        [
+          {
+            "node": "Call RAG Workflow",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call RAG Workflow": {
+      "main": [
+        [
+          {
+            "node": "Format WhatsApp Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format WhatsApp Response": {
+      "main": [
+        [
+          {
+            "node": "Send WhatsApp Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send WhatsApp Reply": {
+      "main": [
+        [
+          {
+            "node": "Save User Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save User Message": {
+      "main": [
+        [
+          {
+            "node": "Save Assistant Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "c95e4623-29e2-4fd4-87d0-2d2d9a643823",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "07a6767757273069f0a582916e3c57f8190196d81fe9eb37ed92ada5e69b4db8"
+  },
+  "id": "vaCBbgPyPhYEJcnK",
+  "tags": [
+    {
+      "createdAt": "2025-10-24T01:17:12.079Z",
+      "updatedAt": "2025-10-24T01:17:12.079Z",
+      "id": "28znMmT2MqQUHQz4",
+      "name": "RAG"
+    }
+  ]
+}
