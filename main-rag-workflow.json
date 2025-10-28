@@ -1,0 +1,660 @@
+{
+  "name": "Internal Knowledge Assistant - Knowledge Search",
+  "nodes": [
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/embeddings",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"text-embedding-3-small\",\n  \"input\": \"={{ $json.content }}\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -2032,
+        -208
+      ],
+      "id": "ba073b50-95ea-4f42-aeb3-5a7ac414e815",
+      "name": "Generate Query Embedding (OpenAI)",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "y5TMgF60HjRgOTR9",
+          "name": "Header Auth account 4"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://internal-knowledge-assistant-pob2btv.svc.aped-4627-b74a.pinecone.io/query",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "pineconeApi",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "vector",
+              "value": "={{ $json.data[0].embedding }}"
+            },
+            {
+              "name": "topK",
+              "value": "5"
+            },
+            {
+              "name": "includeMetadata",
+              "value": "true"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1728,
+        -208
+      ],
+      "id": "56650f48-153b-41a8-a984-6dc42e41a1c0",
+      "name": "Pinecone Query",
+      "credentials": {
+        "pineconeApi": {
+          "id": "mlssg1bcBtHOCp24",
+          "name": "PineconeApi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Pinecone'dan gelen sonuçları al\nconst pineconeData = $input.first().json;\nconst matches = pineconeData.matches || pineconeData[0]?.matches || [];\n\n// Query'yi webhook'tan al\nconst query = $('Knowledge Search - RAG Query').first().json.body.query;\n\n// THRESHOLD EKLE\nconst minScore = 0.5;\nconst relevantMatches = matches.filter(match => match.score >= minScore);\n\n// Eğer sonuç yoksa VEYA tüm sonuçlar düşük score'sa\nif (!matches || matches.length === 0 || relevantMatches.length === 0) {\n  return [{\n    json: {\n      context: \"No relevant information found.\",\n      sources: [],\n      results_count: 0,\n      query: query\n    }\n  }];\n}\n\n// RELEVANT MATCHES kullan (matches yerine)\nconst context = relevantMatches\n  .map((match, index) => {\n    const text = match.metadata.content || '';\n    const filename = match.metadata.filename || 'Unknown';\n    const score = match.score.toFixed(3);\n    \n    return `[Source ${index + 1}] (Relevance: ${score}, File: ${filename})\\n${text}`;\n  })\n  .join('\\n\\n---\\n\\n');\n\n// Sources listesi oluştur\nconst sources = relevantMatches.map(match => ({\n  filename: match.metadata.filename,\n  chunk_id: match.id,\n  score: match.score,\n  chunk_index: match.metadata.chunkIndex\n}));\n\n// Output\nreturn [{\n  json: {\n    context: context,\n    sources: sources,\n    results_count: relevantMatches.length,\n    query: query\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1392,
+        -208
+      ],
+      "id": "3ce58fa9-d503-432d-8395-be06fce90392",
+      "name": "Format Context"
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "gpt-4o-mini",
+          "mode": "list",
+          "cachedResultName": "GPT-4O-MINI"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "You are an intelligent assistant for TechCorp Solutions, helping employees find information from company documents.\n\nRULES:\n1. Answer ONLY based on the provided context\n2. If information is not in context, say \"I don't have that information in our company documents\"\n3. Be concise and professional\n4. Always cite which document(s) you referenced\n5. Use bullet points for multiple items\n6. If context has conflicting info, mention both sources\n\nFORMATTING:\n- Use clear section headers\n- Cite sources like: (Source: HR_Handbook.pdf)\n- Keep answers under 200 words unless more detail is requested",
+              "role": "system"
+            },
+            {
+              "content": "=\n### Yeni:\n```\n# Previous Conversation:\n{{ $('Format Conversation History').item.json.conversation_history || 'No previous conversation' }}\n\n---\n\n# Context from company documents:\n{{ $('Format Context').first().json.context }}"
+            }
+          ]
+        },
+        "options": {
+          "maxTokens": 500,
+          "temperature": 0.3
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.8,
+      "position": [
+        -160,
+        -464
+      ],
+      "id": "edceb851-5628-4007-a81e-e75187975552",
+      "name": "Generate Answer (GPT-4O-MINI)",
+      "credentials": {
+        "openAiApi": {
+          "id": "sIB0oI1ftgYZCBT4",
+          "name": "OpenAi account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "tableId": "knowledge_search_history",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "query",
+              "fieldValue": "={{ $('Format Conversation History').item.json.conversation_history }}"
+            },
+            {
+              "fieldId": "results_count",
+              "fieldValue": "={{ $('Format Context').first().json.results_count }}"
+            },
+            {
+              "fieldId": "response_time_ms",
+              "fieldValue": "1000"
+            },
+            {
+              "fieldId": "metadata",
+              "fieldValue": "={{ $json.metadata }}"
+            },
+            {
+              "fieldId": "user_id",
+              "fieldValue": "={{ $json.user_id }}"
+            },
+            {
+              "fieldId": "platform",
+              "fieldValue": "={{ $json.analytics_data.platform }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        112,
+        208
+      ],
+      "id": "420b00fa-0e86-44b5-babb-bfc6d727a5b6",
+      "name": "Log Search History",
+      "credentials": {
+        "supabaseApi": {
+          "id": "dj1SoSogT6oxVVap",
+          "name": "Supabase account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Format Context'ten direkt al\nconst formatContext = $('Format Context').first().json;\n\n// Generate Answer'dan al\nconst answerNode = $input.first().json;\n\n// ⭐ user_id ve platform'u webhook'tan al (dinamik!)\nconst webhookData = $('Knowledge Search - RAG Query').first().json.body;\nconst userId = webhookData.user_id || \"anonymous\";  // Fallback\nconst platform = webhookData.platform || \"api\";     // ⭐ YENİ!\n\n// Model ismini al\nconst modelUsed = answerNode.model || \"gpt-4o-mini\";\n\n// Sources\nconst sources = formatContext.sources || [];\nconst scores = sources.map(s => s.score);\nconst averageScore = scores.length > 0 \n  ? (scores.reduce((sum, s) => sum + s, 0) / scores.length).toFixed(3)\n  : 0;\nconst topScore = scores.length > 0 ? Math.max(...scores).toFixed(3) : 0;\nconst lowestScore = scores.length > 0 ? Math.min(...scores).toFixed(3) : 0;\nconst sourceFilenames = [...new Set(sources.map(s => s.filename))];\n\n// Answer content\nconst answerContent = answerNode.message?.content || \"\";\n\n// metadata objesi\nconst searchMetadata = {\n  model: modelUsed,\n  average_score: parseFloat(averageScore),\n  top_score: parseFloat(topScore),\n  lowest_score: parseFloat(lowestScore),\n  sources: sourceFilenames,\n  chunks_used: formatContext.results_count || sources.length,\n  answer_length: answerContent.length,\n  timestamp: new Date().toISOString()\n};\n\n// analytics_data objesi\nconst analyticsData = {\n  query: formatContext.query,\n  results_found: formatContext.results_count || sources.length,\n  model_used: modelUsed,\n  answer_length: answerContent.length,\n  average_relevance: parseFloat(averageScore),\n  sources_used: sourceFilenames,\n  platform: platform  // ⭐ YENİ!\n};\n\n// Output - user_id ve platform eklendi!\nreturn [{\n  json: {\n    query: formatContext.query,\n    results_count: formatContext.results_count,\n    user_id: userId,      // ⭐ Dinamik!\n    platform: platform,   // ⭐ YENİ!\n    metadata: searchMetadata,\n    analytics_data: analyticsData,\n    answer: answerContent,\n    model: modelUsed\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -192,
+        32
+      ],
+      "id": "4ed996c7-3355-4607-a921-cc83ee5c15d4",
+      "name": "Prepare Search Metadata"
+    },
+    {
+      "parameters": {
+        "tableId": "knowledge_user_analytics",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "action_type",
+              "fieldValue": "search"
+            },
+            {
+              "fieldId": "action_details",
+              "fieldValue": "={{ $json.analytics_data }}"
+            },
+            {
+              "fieldId": "user_id",
+              "fieldValue": "={{ $json.user_id }}"
+            },
+            {
+              "fieldId": "platform",
+              "fieldValue": "={{ $json.analytics_data.platform }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        112,
+        -96
+      ],
+      "id": "ead6b2b1-1a00-476d-8ad5-6f40104e487a",
+      "name": "Log User Analytics",
+      "credentials": {
+        "supabaseApi": {
+          "id": "dj1SoSogT6oxVVap",
+          "name": "Supabase account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({\n  query: $('Generate Answer (GPT-4O-MINI)').item.json.content,\n  answer: $('Generate Answer (GPT-4O-MINI)').item.json.message.content,\n  model: $('Prepare Search Metadata').item.json.model,\n  sources: $('Prepare Search Metadata').item.json.metadata.sources\n}) }}",
+        "options": {
+          "responseCode": 200,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          }
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        112,
+        64
+      ],
+      "id": "ac2d536a-65d6-4bc3-911a-437a9dc0997e",
+      "name": "Respond to Webhook"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "KnowledgeSearch",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -1712,
+        -480
+      ],
+      "id": "50c31f52-8876-4404-92c8-4f4917e496a2",
+      "name": "Knowledge Search - RAG Query",
+      "webhookId": "91c30b26-6259-4396-b798-0006e136900d"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract conversation data from webhook\nconst input = $input.first().json;\n\n// UUID helper function\nfunction isValidUUID(str) {\n  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;\n  return uuidRegex.test(str);\n}\n\nfunction generateUUID() {\n  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {\n    const r = Math.random() * 16 | 0;\n    const v = c === 'x' ? r : (r & 0x3 | 0x8);\n    return v.toString(16);\n  });\n}\n\n// String temizleme fonksiyonu - N8N expression karakterlerini temizler\nfunction cleanString(str) {\n  if (!str || typeof str !== 'string') return str;\n  // \"=\" ile başlıyorsa kaldır\n  if (str.startsWith('=')) {\n    str = str.substring(1);\n  }\n  return str.trim();\n}\n\n// Check body first, then top level\nlet conversationId = input.body?.conversation_id ||\n                     input.conversation_id || \n                     input.body?.thread_ts ||\n                     input.thread_ts || \n                     input.body?.session_id ||\n                     input.session_id;\n\n// If not a valid UUID, generate one\nif (!conversationId || !isValidUUID(conversationId)) {\n  conversationId = generateUUID();\n}\n\n// Get user info - temizle\nlet userId = input.body?.user_id ||\n             input.user_id || \n             input.user?.id || \n             'anonymous';\nuserId = cleanString(userId);\n\n// Get platform\nconst platform = input.body?.platform || input.platform || 'api';\n\n// Get query - BODY içinde question varsa onu al ve temizle\nlet query = input.body?.question ||   // IVR: body.question\n            input.body?.query ||      // IVR: body.query\n            input.query ||             // Slack: top level query\n            input.text ||              // Slack: text\n            input.message ||           // Genel: message\n            '';\nquery = cleanString(query);\n\nreturn {\n  json: {\n    conversation_id: conversationId,\n    user_id: userId,\n    platform: platform,\n    query: query,\n    original_input: input\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1072,
+        -480
+      ],
+      "id": "845628af-7612-48f2-9b11-57376c426fed",
+      "name": "Extract & Prepare Conversation"
+    },
+    {
+      "parameters": {
+        "tableId": "knowledge_messages",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "user_id",
+              "fieldValue": "={{ $json.user_id }}"
+            },
+            {
+              "fieldId": "conversation_id",
+              "fieldValue": "={{ $json.conversation_id.toString() }}"
+            },
+            {
+              "fieldId": "platform",
+              "fieldValue": "={{ $json.platform }}"
+            },
+            {
+              "fieldId": "content",
+              "fieldValue": "={{ $json.query }}"
+            },
+            {
+              "fieldId": "role",
+              "fieldValue": "user"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        -736,
+        -480
+      ],
+      "id": "a3c92f2c-9600-404e-af8b-3a2ad9e98ccf",
+      "name": "Save User Message",
+      "credentials": {
+        "supabaseApi": {
+          "id": "dj1SoSogT6oxVVap",
+          "name": "Supabase account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "tableId": "knowledge_messages",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "conversation_id",
+              "fieldValue": "={{ $('Extract & Prepare Conversation').first().json.conversation_id }}"
+            },
+            {
+              "fieldId": "user_id",
+              "fieldValue": "={{ $('Extract & Prepare Conversation').first().json.user_id }}"
+            },
+            {
+              "fieldId": "platform",
+              "fieldValue": "={{ $('Extract & Prepare Conversation').first().json.platform }}"
+            },
+            {
+              "fieldId": "role",
+              "fieldValue": "assistant"
+            },
+            {
+              "fieldId": "content",
+              "fieldValue": "={{ $json.message.content }}"
+            },
+            {
+              "fieldId": "metadata",
+              "fieldValue": "={{ JSON.stringify($('Format Context').first().json.sources) }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        -368,
+        32
+      ],
+      "id": "c5d00148-8095-4917-9b1c-316a99b50e48",
+      "name": "Save Assistant Message",
+      "credentials": {
+        "supabaseApi": {
+          "id": "dj1SoSogT6oxVVap",
+          "name": "Supabase account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "tableId": "knowledge_messages",
+        "limit": 10,
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "conversation_id",
+              "condition": "eq",
+              "keyValue": "={{ $('Extract & Prepare Conversation').item.json.conversation_id }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        -1104,
+        48
+      ],
+      "id": "bc6797a4-705a-4840-9ce6-8ed0517437b0",
+      "name": "Get Conversation History",
+      "credentials": {
+        "supabaseApi": {
+          "id": "dj1SoSogT6oxVVap",
+          "name": "Supabase account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Get conversation history from previous node\nconst messages = $input.all().map(item => item.json);\n\n// Sort by created_at (oldest first)\nmessages.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));\n\n// Format for LLM\nconst formattedHistory = messages.map(msg => {\n  return `${msg.role}: ${msg.content}`;\n}).join('\\n\\n');\n\nreturn {\n  json: {\n    conversation_history: formattedHistory,\n    message_count: messages.length\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -752,
+        48
+      ],
+      "id": "812344d3-87d1-42ea-8826-0ac5553e360c",
+      "name": "Format Conversation History"
+    },
+    {
+      "parameters": {
+        "content": "📞 Multi-Channel Input\nReceives queries from IVR (Twilio), Slack, WhatsApp, and Web Chatbot via unified webhook endpoint",
+        "height": 272,
+        "width": 896,
+        "color": 3
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -2080,
+        -560
+      ],
+      "typeVersion": 1,
+      "id": "31a44c82-f18f-4128-bde9-ba70a2971a0f",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "content": "🔄 Query Normalization\nStandardizes input from different platforms, cleans special characters (=), and saves user messages to Supabase",
+        "height": 272,
+        "width": 768,
+        "color": 2
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -1184,
+        -560
+      ],
+      "typeVersion": 1,
+      "id": "61803e9e-e126-4374-a8c3-2840b6bdf22e",
+      "name": "Sticky Note1"
+    },
+    {
+      "parameters": {
+        "content": "🔍 Semantic Search\nConverts query to vector embedding, searches Pinecone for relevant documents (threshold: 0.5), and formats context for AI",
+        "height": 288,
+        "width": 896
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -2080,
+        -288
+      ],
+      "typeVersion": 1,
+      "id": "6def62c7-6daf-4992-ae09-8c7cb1aef930",
+      "name": "Sticky Note2"
+    },
+    {
+      "parameters": {
+        "content": "💬 Context Management\nRetrieves past conversation from Supabase and formats it for context-aware responses",
+        "height": 368,
+        "width": 768,
+        "color": 4
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -1184,
+        -16
+      ],
+      "typeVersion": 1,
+      "id": "6cb87e1c-9d4d-4684-ab5d-69c2d9a50526",
+      "name": "Sticky Note3"
+    },
+    {
+      "parameters": {
+        "content": "🤖 AI Answer Generation\nGPT-4 generates contextual answers using retrieved documents and conversation history",
+        "height": 384,
+        "width": 848,
+        "color": 6
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -416,
+        -560
+      ],
+      "typeVersion": 1,
+      "id": "8756eb9d-4e42-481a-856a-a5efe4bd6b79",
+      "name": "Sticky Note4"
+    },
+    {
+      "parameters": {
+        "content": "📤 Response & Logging\nFormats platform-specific responses and logs analytics to Supabase",
+        "height": 528,
+        "width": 848,
+        "color": 5
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -416,
+        -176
+      ],
+      "typeVersion": 1,
+      "id": "062b2d96-331c-4920-97d0-aa7e92775e88",
+      "name": "Sticky Note5"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Generate Query Embedding (OpenAI)": {
+      "main": [
+        [
+          {
+            "node": "Pinecone Query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pinecone Query": {
+      "main": [
+        [
+          {
+            "node": "Format Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Context": {
+      "main": [
+        [
+          {
+            "node": "Get Conversation History",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Answer (GPT-4O-MINI)": {
+      "main": [
+        [
+          {
+            "node": "Save Assistant Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Search Metadata": {
+      "main": [
+        [
+          {
+            "node": "Log Search History",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Log User Analytics",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Search History": {
+      "main": [
+        []
+      ]
+    },
+    "Knowledge Search - RAG Query": {
+      "main": [
+        [
+          {
+            "node": "Extract & Prepare Conversation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract & Prepare Conversation": {
+      "main": [
+        [
+          {
+            "node": "Save User Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save User Message": {
+      "main": [
+        [
+          {
+            "node": "Generate Query Embedding (OpenAI)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Assistant Message": {
+      "main": [
+        [
+          {
+            "node": "Prepare Search Metadata",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Conversation History": {
+      "main": [
+        [
+          {
+            "node": "Format Conversation History",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Conversation History": {
+      "main": [
+        [
+          {
+            "node": "Generate Answer (GPT-4O-MINI)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {},
+  "versionId": "192ba1f1-1eb9-4606-883a-aa794f2747b7",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "07a6767757273069f0a582916e3c57f8190196d81fe9eb37ed92ada5e69b4db8"
+  },
+  "id": "itc1l37SFnSX3P9p",
+  "tags": [
+    {
+      "createdAt": "2025-10-24T01:17:12.079Z",
+      "updatedAt": "2025-10-24T01:17:12.079Z",
+      "id": "28znMmT2MqQUHQz4",
+      "name": "RAG"
+    }
+  ]
+}
