@@ -3,7 +3,7 @@
   "nodes": [
     {
       "parameters": {
-        "httpMethod": "POST",
+        "httpMethod": "GET",
         "path": "whatsapp-incoming",
         "responseMode": "lastNode",
         "options": {}
