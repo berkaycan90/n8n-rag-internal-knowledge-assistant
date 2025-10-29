@@ -1,0 +1,45 @@
+# Environment Variables
+.env
+.env.local
+.env.*.local
+*.env
+
+# N8N Local Data
+.n8n/
+n8n-data/
+*.db
+*.sqlite
+
+# API Keys and Secrets
+config.json
+secrets.json
+credentials.txt
+*.key
+*.pem
+
+# Node modules
+node_modules/
+npm-debug.log
+yarn-error.log
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS Files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Backup files
+*.bak
